@@ -41,6 +41,7 @@ body { margin: 0; min-width: 980px; }
 .resize-handle { background: #2d3445; cursor: col-resize; width: 7px; }
 .resize-handle:hover { background: #60a5fa; }
 .visual-pane { background: #111827; }
+.sync-indicator { background: #0f172a; border-bottom: 1px solid #2d3445; color: #93c5fd; font-size: .85rem; padding: 7px 14px; }
 .reader-frame { flex: 1; overflow: auto; padding: 28px; }
 .editable-document-frame {
   background: #fff; border: 0; box-shadow: 0 20px 70px rgba(0,0,0,.32); display: block;

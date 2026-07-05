@@ -111,13 +111,19 @@ export default function App() {
   const [leftWidth, setLeftWidth] = useState(48);
   const [sourceMatch, setSourceMatch] = useState<SourceMatch | null>(null);
   const [positionStatus, setPositionStatus] = useState('Cliquez dans le rendu ou le code pour synchroniser la position.');
+  const [syncStatus, setSyncStatus] = useState('Synchronisation active');
   const previewRef = useRef<HTMLIFrameElement>(null);
   const sourceRef = useRef<HTMLTextAreaElement>(null);
   const sourceOverlayRef = useRef<HTMLPreElement>(null);
   const highlightTimer = useRef<number | undefined>(undefined);
   const renderHighlightTimer = useRef<number | undefined>(undefined);
-  const isVisualSync = useRef(false);
+  const skipNextPreviewWrite = useRef(false);
+  const htmlRef = useRef(html);
   const validation = useMemo(() => sanitizeEditableHtml(html), [html]);
+
+  useEffect(() => {
+    htmlRef.current = html;
+  }, [html]);
 
   const highlightedSource = useMemo(() => {
     if (!sourceMatch) return escapeHtml(html);
@@ -140,23 +146,23 @@ export default function App() {
       const textarea = sourceRef.current;
       if (!textarea) return;
       textarea.setSelectionRange(match.start, match.end);
-      const before = html.slice(0, match.start);
+      const before = htmlRef.current.slice(0, match.start);
       const line = before.split('\n').length - 1;
       const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight) || 22;
       textarea.scrollTop = Math.max(0, line * lineHeight - textarea.clientHeight / 2);
       syncOverlayScroll();
     });
-  }, [html, syncOverlayScroll]);
+  }, [syncOverlayScroll]);
 
   const syncFromPreviewSelection = useCallback(() => {
     const iframeDocument = previewRef.current?.contentDocument;
     if (!iframeDocument?.body) return;
     const context = getRenderContext(iframeDocument);
     if (!context) return;
-    const match = findSourceMatch(html, context);
+    const match = findSourceMatch(htmlRef.current, context);
     if (match) revealSourceMatch(match);
     else setPositionStatus('Correspondance non trouvée dans le HTML source.');
-  }, [html, revealSourceMatch]);
+  }, [revealSourceMatch]);
 
   const syncPreviewFromSource = useCallback((cursor: number) => {
     const iframeDocument = previewRef.current?.contentDocument;
@@ -178,21 +184,33 @@ export default function App() {
 
   const updateFromPreview = useCallback(() => {
     const iframeDocument = previewRef.current?.contentDocument;
-    if (!iframeDocument) return;
+    if (!iframeDocument?.body) return;
 
-    isVisualSync.current = true;
-    setHtml(buildHtmlOutput({
+    iframeDocument.querySelectorAll('.ek-render-position-highlight').forEach((node) => {
+      node.classList.remove('ek-render-position-highlight');
+    });
+
+    const nextHtml = buildHtmlOutput({
       bodyHtml: iframeDocument.body.innerHTML,
       bodyAttributes: validation.bodyAttributes,
       headHtml: validation.headHtml,
       isFullDocument: validation.isFullDocument,
-    }));
-    window.setTimeout(() => { isVisualSync.current = false; }, 0);
+    });
+
+    skipNextPreviewWrite.current = true;
+    setSourceMatch(null);
+    setSyncStatus('Synchronisation active — dernière modification visuelle intégrée');
+    setHtml(nextHtml);
   }, [validation.bodyAttributes, validation.headHtml, validation.isFullDocument]);
 
   useEffect(() => {
     const iframeDocument = previewRef.current?.contentDocument;
-    if (!iframeDocument || isVisualSync.current) return;
+    if (!iframeDocument) return;
+
+    if (skipNextPreviewWrite.current) {
+      skipNextPreviewWrite.current = false;
+      return;
+    }
 
     iframeDocument.open();
     iframeDocument.write(`<!doctype html>
@@ -229,6 +247,7 @@ ${validation.headHtml}
     iframeDocument.body.addEventListener('paste', handlePaste);
 
     return () => {
+      if (skipNextPreviewWrite.current) return;
       iframeDocument.body?.removeEventListener('input', handleInput);
       iframeDocument.body?.removeEventListener('blur', handleInput);
       iframeDocument.body?.removeEventListener('click', handlePointerOrSelection);
@@ -311,7 +330,7 @@ ${validation.headHtml}
               ref={sourceRef}
               value={html}
               spellCheck={false}
-              onChange={(e) => { setHtml(e.target.value); setSourceMatch(null); }}
+              onChange={(e) => { setHtml(e.target.value); setSourceMatch(null); setSyncStatus('Synchronisation active — source HTML modifiée'); }}
               onClick={(e) => syncPreviewFromSource(e.currentTarget.selectionStart)}
               onKeyUp={(e) => syncPreviewFromSource(e.currentTarget.selectionStart)}
               onScroll={syncOverlayScroll}
@@ -322,13 +341,14 @@ ${validation.headHtml}
         <div className="resize-handle" onPointerDown={startResize} title="Redimensionner" />
         <section className="pane visual-pane" style={{ flexBasis: `${100 - leftWidth}%` }}>
           <div className="pane-header"><strong>Rendu éditable isolé</strong><span className={`status ${validation.status}`}>{validation.message}</span></div>
+          <div className="sync-indicator" role="status">{syncStatus}</div>
           <div className="reader-frame">
             <iframe ref={previewRef} className="editable-document-frame" title="Rendu HTML éditable isolé" sandbox="allow-same-origin" />
           </div>
         </section>
       </main>
       <footer className="notes">
-        <strong>Repérage :</strong> {positionStatus} <strong>Limites :</strong> l’édition visuelle conserve les balises, styles et classes existants tant que les changements restent textuels ou structurels simples. Les mises en page très complexes, scripts et attributs événementiels sont neutralisés pour limiter les risques côté rendu local.
+        <strong>Repérage :</strong> {positionStatus} <strong>Synchronisation :</strong> {syncStatus}. <strong>Limites :</strong> l’édition visuelle conserve les balises, styles et classes existants tant que les changements restent textuels ou structurels simples. Les mises en page très complexes, scripts et attributs événementiels sont neutralisés pour limiter les risques côté rendu local.
       </footer>
     </div>
   );
