@@ -23,32 +23,37 @@ export const exampleHtml = `<article class="fiche connaissance" data-topic="édi
 </article>`;
 
 const parser = new DOMParser();
+const fullDocumentPattern = /<!doctype\s+html|<html[\s>]|<head[\s>]|<body[\s>]/i;
 
 export type HtmlValidation = {
+  bodyHtml: string;
+  bodyAttributes: string;
+  headHtml: string;
   safeHtml: string;
+  isFullDocument: boolean;
   status: 'synchronized' | 'warning';
   message: string;
 };
 
 export function sanitizeEditableHtml(input: string): HtmlValidation {
   try {
+    const isFullDocument = fullDocumentPattern.test(input);
     const document = parser.parseFromString(input, 'text/html');
     const parserError = document.querySelector('parsererror');
 
-    document.querySelectorAll('script, iframe, object, embed, link[rel="import"]').forEach((node) => node.remove());
-    document.querySelectorAll<HTMLElement>('*').forEach((element) => {
-      [...element.attributes].forEach((attribute) => {
-        const name = attribute.name.toLowerCase();
-        const value = attribute.value.trim().toLowerCase();
-        if (name.startsWith('on')) element.removeAttribute(attribute.name);
-        if ((name === 'href' || name === 'src') && value.startsWith('javascript:')) {
-          element.removeAttribute(attribute.name);
-        }
-      });
-    });
+    sanitizeDocument(document);
+
+    const headHtml = isFullDocument ? document.head.innerHTML : '';
+    const bodyHtml = document.body.innerHTML;
+    const bodyAttributes = isFullDocument ? serializeAttributes(document.body) : '';
+    const safeHtml = buildHtmlOutput({ bodyHtml, bodyAttributes, headHtml, isFullDocument });
 
     return {
-      safeHtml: document.body.innerHTML,
+      bodyHtml,
+      bodyAttributes,
+      headHtml,
+      safeHtml,
+      isFullDocument,
       status: parserError ? 'warning' : 'synchronized',
       message: parserError
         ? 'HTML partiellement invalide : rendu dégradé généré par le navigateur.'
@@ -56,11 +61,21 @@ export function sanitizeEditableHtml(input: string): HtmlValidation {
     };
   } catch (error) {
     return {
+      bodyHtml: '',
+      bodyAttributes: '',
+      headHtml: '',
       safeHtml: '',
+      isFullDocument: false,
       status: 'warning',
       message: error instanceof Error ? error.message : 'Erreur inconnue pendant le rendu HTML.',
     };
   }
+}
+
+export function buildHtmlOutput(parts: Pick<HtmlValidation, 'bodyHtml' | 'bodyAttributes' | 'headHtml' | 'isFullDocument'>): string {
+  if (!parts.isFullDocument) return parts.bodyHtml;
+
+  return `<!doctype html>\n<html>\n<head>\n${parts.headHtml}\n</head>\n<body${parts.bodyAttributes ? ` ${parts.bodyAttributes}` : ''}>\n${parts.bodyHtml}\n</body>\n</html>`;
 }
 
 export function formatHtml(input: string): string {
@@ -82,6 +97,34 @@ export function formatHtml(input: string): string {
 
 export function minifyHtml(input: string): string {
   return sanitizeEditableHtml(input).safeHtml.replace(/\s{2,}/g, ' ').replace(/>\s+</g, '><').trim();
+}
+
+function sanitizeDocument(document: Document) {
+  document.querySelectorAll('script, iframe, object, embed, link[rel="import"]').forEach((node) => node.remove());
+  document.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    [...element.attributes].forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim().toLowerCase();
+      if (name.startsWith('on')) element.removeAttribute(attribute.name);
+      if ((name === 'href' || name === 'src') && value.startsWith('javascript:')) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+  });
+}
+
+function serializeAttributes(element: HTMLElement): string {
+  return [...element.attributes]
+    .map((attribute) => `${attribute.name}=\"${escapeAttribute(attribute.value)}\"`)
+    .join(' ');
+}
+
+function escapeAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/\"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function isVoidElementLine(line: string): boolean {
