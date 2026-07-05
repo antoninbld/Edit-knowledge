@@ -29,16 +29,6 @@ npm run preview
 - commandes visuelles de base : gras, italique, listes, lien ;
 - rendu sécurisé de façon minimale : suppression des scripts, iframes, objets embarqués, attributs `on*` et URLs `javascript:`.
 
-
-## Insertion d'images sans base64
-
-Le bouton **Insérer une image** n'écrit jamais de base64 dans le HTML final.
-
-- En `npm run dev` et en `npm run preview`, Vite expose `POST /api/images` via un middleware local. L'image est copiée dans `public/images`, puis le HTML référence un chemin relatif `images/nom.ext`.
-- Sur un hébergement statique comme GitHub Pages, aucune route backend ne peut recevoir `POST /api/images` ni écrire dans `public/images` au runtime. L'application insère donc un aperçu local `blob:` dans l'iframe, mémorise le fichier dans IndexedDB pour pouvoir relire le même HTML dans le navigateur, mais garde dans le HTML final un `src="images/nom.ext"`. Pour publier la fiche ou l'ouvrir dans un autre navigateur, copiez aussi le fichier image correspondant dans un dossier `images` placé à côté du HTML exporté.
-
-Architecture recommandée si l'écriture automatique d'images doit fonctionner aussi en ligne : déployer une vraie API d'upload (Node/Express, serverless function ou stockage objet type S3/R2/Supabase Storage), puis faire renvoyer à l'éditeur l'URL publique ou le chemin relatif à écrire dans le HTML.
-
 ## Synchronisation de position
 
 La zone de code reste une `textarea` native pour conserver une interface légère, compatible avec GitHub Pages et sans dépendance lourde. Pour permettre le surlignage d’un fragment précis, l’application ajoute un calque `<pre>` synchronisé derrière la `textarea` : le texte de la `textarea` reste éditable, tandis que le calque affiche le même contenu avec un `<mark>` jaune sur la correspondance trouvée.

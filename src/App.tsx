@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Toolbar } from './components/Toolbar';
 import { buildHtmlOutput, exampleHtml, formatHtml, minifyHtml, sanitizeEditableHtml } from './utils/html';
+import { getLocalImagePreviewSrc, rememberLocalImagePreview, storeLocalImage } from './utils/localImages';
 import './styles.css';
 
 type SourceMatch = { start: number; end: number; status: string };
@@ -13,9 +14,6 @@ const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|webp|gif)$/i;
 const FIGURE_WIDTH_CLASSES = ['figure-small', 'figure-medium', 'figure-large', 'figure-full'];
 const IMAGE_UPLOAD_ENDPOINT = '/api/images';
 const LOCAL_IMAGE_DIRECTORY = 'images';
-const LOCAL_IMAGE_DB_NAME = 'edit-knowledge-images';
-const LOCAL_IMAGE_STORE_NAME = 'images';
-const localImagePreviewUrls = new Map<string, string>();
 type FigureWidth = 'small' | 'medium' | 'large' | 'full';
 
 function isSupportedImageFile(file: File): boolean {
@@ -47,49 +45,8 @@ function createLocalImageReference(file: File): { previewSrc: string; outputSrc:
   const fileName = `${cleanImageName(file.name)}-${Date.now().toString(36)}.${getImageExtension(file)}`;
   const outputSrc = `${LOCAL_IMAGE_DIRECTORY}/${fileName}`;
   const previewSrc = URL.createObjectURL(file);
-  localImagePreviewUrls.set(outputSrc, previewSrc);
+  rememberLocalImagePreview(outputSrc, previewSrc);
   return { previewSrc, outputSrc, fileName };
-}
-
-function openLocalImageDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(LOCAL_IMAGE_DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore(LOCAL_IMAGE_STORE_NAME);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('Ouverture du stockage image local impossible.'));
-  });
-}
-
-async function storeLocalImage(outputSrc: string, file: File): Promise<void> {
-  const database = await openLocalImageDatabase();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(LOCAL_IMAGE_STORE_NAME, 'readwrite');
-    transaction.objectStore(LOCAL_IMAGE_STORE_NAME).put(file, outputSrc);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error('Enregistrement local de l’image impossible.'));
-  });
-  database.close();
-}
-
-async function getLocalImagePreviewSrc(outputSrc: string): Promise<string | null> {
-  const existingPreviewSrc = localImagePreviewUrls.get(outputSrc);
-  if (existingPreviewSrc) return existingPreviewSrc;
-
-  const database = await openLocalImageDatabase();
-  const blob = await new Promise<Blob | undefined>((resolve, reject) => {
-    const transaction = database.transaction(LOCAL_IMAGE_STORE_NAME, 'readonly');
-    const request = transaction.objectStore(LOCAL_IMAGE_STORE_NAME).get(outputSrc);
-    request.onsuccess = () => resolve(request.result as Blob | undefined);
-    request.onerror = () => reject(request.error ?? new Error('Lecture locale de l’image impossible.'));
-  });
-  database.close();
-  if (!blob) return null;
-
-  const previewSrc = URL.createObjectURL(blob);
-  localImagePreviewUrls.set(outputSrc, previewSrc);
-  return previewSrc;
 }
 
 function normalizeText(value: string): string {
