@@ -133,7 +133,7 @@ export default function App() {
   const syncOverlayScroll = useCallback(() => {
     if (!sourceRef.current || !sourceOverlayRef.current) return;
     sourceOverlayRef.current.scrollTop = sourceRef.current.scrollTop;
-    sourceOverlayRef.current.scrollLeft = sourceRef.current.scrollLeft;
+    sourceOverlayRef.current.scrollLeft = 0;
   }, []);
 
   const revealSourceMatch = useCallback((match: SourceMatch) => {
@@ -144,12 +144,20 @@ export default function App() {
 
     requestAnimationFrame(() => {
       const textarea = sourceRef.current;
+      const overlay = sourceOverlayRef.current;
       if (!textarea) return;
       textarea.setSelectionRange(match.start, match.end);
-      const before = htmlRef.current.slice(0, match.start);
-      const line = before.split('\n').length - 1;
-      const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight) || 22;
-      textarea.scrollTop = Math.max(0, line * lineHeight - textarea.clientHeight / 2);
+
+      const highlightedMark = overlay?.querySelector('mark');
+      if (highlightedMark instanceof HTMLElement) {
+        textarea.scrollTop = Math.max(0, highlightedMark.offsetTop - textarea.clientHeight / 2);
+      } else {
+        const before = htmlRef.current.slice(0, match.start);
+        const line = before.split('\n').length - 1;
+        const lineHeight = Number.parseFloat(getComputedStyle(textarea).lineHeight) || 22;
+        textarea.scrollTop = Math.max(0, line * lineHeight - textarea.clientHeight / 2);
+      }
+      textarea.scrollLeft = 0;
       syncOverlayScroll();
     });
   }, [syncOverlayScroll]);
@@ -330,6 +338,7 @@ ${validation.headHtml}
               ref={sourceRef}
               value={html}
               spellCheck={false}
+              wrap="soft"
               onChange={(e) => { setHtml(e.target.value); setSourceMatch(null); setSyncStatus('Synchronisation active — source HTML modifiée'); }}
               onClick={(e) => syncPreviewFromSource(e.currentTarget.selectionStart)}
               onKeyUp={(e) => syncPreviewFromSource(e.currentTarget.selectionStart)}
