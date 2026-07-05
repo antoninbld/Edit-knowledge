@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Toolbar } from './components/Toolbar';
 import { buildHtmlOutput, exampleHtml, formatHtml, minifyHtml, sanitizeEditableHtml } from './utils/html';
+import { getLocalImagePreviewSrc, storeLocalImage } from './utils/localImages';
 import './styles.css';
 
 type SourceMatch = { start: number; end: number; status: string };
@@ -318,6 +319,11 @@ export default function App() {
       setSyncStatus(error instanceof Error ? `Insertion refusée — ${error.message}` : 'Insertion refusée — sauvegarde image impossible');
       return;
     }
+    if (!imageReference.persisted) {
+      void storeLocalImage(imageReference.outputSrc, file).catch((storageError) => {
+        console.warn('Persistance IndexedDB indisponible, aperçu conservé pour la session courante uniquement.', storageError);
+      });
+    }
     iframeDocument.body.focus();
     const selection = iframeDocument.getSelection();
     selection?.removeAllRanges();
@@ -412,6 +418,18 @@ ${validation.headHtml}
 <body${validation.bodyAttributes ? ` ${validation.bodyAttributes}` : ''} contenteditable="${visualEditing ? 'true' : 'false'}">${validation.bodyHtml}</body>
 </html>`);
     iframeDocument.close();
+
+    iframeDocument.querySelectorAll<HTMLImageElement>(`img[src^="${LOCAL_IMAGE_DIRECTORY}/"]`).forEach((image) => {
+      const outputSrc = image.getAttribute('src');
+      if (!outputSrc) return;
+      void getLocalImagePreviewSrc(outputSrc).then((previewSrc) => {
+        if (!previewSrc || !iframeDocument.body.contains(image)) return;
+        image.setAttribute('data-ek-src', outputSrc);
+        image.setAttribute('src', previewSrc);
+      }).catch((error) => {
+        console.warn('Aperçu local introuvable pour l’image insérée.', error);
+      });
+    });
 
     const handleInput = () => updateFromPreview();
     const handlePointerOrSelection = (event?: Event) => {
