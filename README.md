@@ -21,11 +21,23 @@ npm run preview
 - collage d'un exemple de fiche HTML ;
 - chargement d'un fichier `.html` ou `.htm` ;
 - édition bidirectionnelle entre le HTML source et le rendu `contentEditable` ;
+- repérage de position entre le rendu et le code : un clic dans la fiche fait défiler le HTML source vers le mot ou fragment correspondant et le surligne en jaune ;
+- repérage inverse léger : un clic dans le code tente de retrouver le texte visible correspondant dans l’iframe et met brièvement en évidence son élément parent ;
 - redimensionnement horizontal des deux panneaux ;
 - formatage et minification simples du HTML ;
 - copie et téléchargement du HTML final ;
 - commandes visuelles de base : gras, italique, listes, lien ;
 - rendu sécurisé de façon minimale : suppression des scripts, iframes, objets embarqués, attributs `on*` et URLs `javascript:`.
+
+## Synchronisation de position
+
+La zone de code reste une `textarea` native pour conserver une interface légère, compatible avec GitHub Pages et sans dépendance lourde. Pour permettre le surlignage d’un fragment précis, l’application ajoute un calque `<pre>` synchronisé derrière la `textarea` : le texte de la `textarea` reste éditable, tandis que le calque affiche le même contenu avec un `<mark>` jaune sur la correspondance trouvée.
+
+Dans le sens rendu visuel → source, les clics, déplacements de curseur et changements de sélection dans l’iframe extraient le mot courant, le texte sélectionné ou un contexte court du parent. L’application recherche ensuite ce fragment dans le HTML source en tolérant les différences d’accents, de casse, d’espaces et de retours à la ligne, puis choisit l’occurrence la plus proche de la position approximative dans le document.
+
+Dans le sens source → rendu, un clic ou déplacement de curseur dans le code extrait le mot visible le plus proche. Les fragments techniques sans équivalent visible, comme les balises, styles, métadonnées ou attributs, sont ignorés lorsqu’aucun texte affichable ne peut être identifié. Si une correspondance existe dans l’iframe, son élément parent est centré et brièvement encadré en jaune.
+
+Limite : lorsque le même mot apparaît plusieurs fois avec un contexte très proche, l’application choisit la correspondance la plus probable grâce au contexte et à la position approximative, mais une ambiguïté reste possible.
 
 ## Architecture
 

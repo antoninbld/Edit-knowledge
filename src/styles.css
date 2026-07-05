@@ -26,10 +26,18 @@ body { margin: 0; min-width: 980px; }
   align-items: center; background: #171b25; border-bottom: 1px solid #2d3445; color: #aeb8cc;
   display: flex; justify-content: space-between; padding: 10px 14px;
 }
-.code-pane textarea {
-  background: #0b0e14; border: 0; color: #dbeafe; flex: 1; font: 14px/1.55 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-  outline: none; padding: 18px; resize: none; tab-size: 2; white-space: pre; overflow: auto;
+.source-editor-shell { background: #0b0e14; flex: 1; min-height: 0; position: relative; }
+.source-editor-shell textarea, .source-highlight-overlay {
+  border: 0; font: 14px/1.55 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  inset: 0; margin: 0; outline: none; overflow: auto; padding: 18px; position: absolute;
+  resize: none; tab-size: 2; white-space: pre; width: 100%; height: 100%;
 }
+.source-editor-shell textarea {
+  background: transparent; caret-color: #f8fafc; color: transparent; z-index: 2;
+}
+.source-editor-shell textarea::selection { background: rgba(96, 165, 250, .35); color: transparent; }
+.source-highlight-overlay { color: #dbeafe; pointer-events: none; z-index: 1; }
+.source-highlight-overlay mark { background: rgba(250, 204, 21, .82); border-radius: 3px; color: #111827; padding: 1px 0; }
 .resize-handle { background: #2d3445; cursor: col-resize; width: 7px; }
 .resize-handle:hover { background: #60a5fa; }
 .visual-pane { background: #111827; }
