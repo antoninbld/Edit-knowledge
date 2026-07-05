@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Toolbar } from './components/Toolbar';
 import { buildHtmlOutput, exampleHtml, formatHtml, minifyHtml, sanitizeEditableHtml } from './utils/html';
-import { getLocalImagePreviewSrc, storeLocalImage } from './utils/localImages';
 import './styles.css';
 
 type SourceMatch = { start: number; end: number; status: string };
@@ -13,7 +12,6 @@ const IMAGE_FILE_PATTERN = /^image\/(png|jpeg|webp|gif)$/;
 const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|webp|gif)$/i;
 const FIGURE_WIDTH_CLASSES = ['figure-small', 'figure-medium', 'figure-large', 'figure-full'];
 const IMAGE_UPLOAD_ENDPOINT = '/api/images';
-const LOCAL_IMAGE_DIRECTORY = 'images';
 type FigureWidth = 'small' | 'medium' | 'large' | 'full';
 
 function isSupportedImageFile(file: File): boolean {
@@ -22,32 +20,6 @@ function isSupportedImageFile(file: File): boolean {
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function cleanImageName(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\.[^.]+$/, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 42) || 'image';
-}
-
-function getImageExtension(file: File): string {
-  const mimeExtension = file.type === 'image/jpeg' ? 'jpg' : file.type.replace('image/', '');
-  const fileExtension = file.name.match(/\.(png|jpe?g|webp|gif)$/i)?.[1]?.toLowerCase().replace('jpeg', 'jpg');
-  return ['png', 'jpg', 'webp', 'gif'].includes(mimeExtension) ? mimeExtension : fileExtension || 'png';
-}
-
-function createLocalImageReference(file: File): { previewSrc: string; outputSrc: string; fileName: string } {
-  const fileName = `${cleanImageName(file.name)}-${Date.now().toString(36)}.${getImageExtension(file)}`;
-  return {
-    previewSrc: URL.createObjectURL(file),
-    outputSrc: `${LOCAL_IMAGE_DIRECTORY}/${fileName}`,
-    fileName,
-  };
 }
 
 function normalizeText(value: string): string {
@@ -211,7 +183,6 @@ export default function App() {
     else setPositionStatus('Correspondance non trouvée dans le HTML source.');
   }, [revealSourceMatch]);
 
-
   const rememberPreviewSelection = useCallback(() => {
     const iframeDocument = previewRef.current?.contentDocument;
     const selection = iframeDocument?.getSelection();
@@ -266,10 +237,6 @@ export default function App() {
     cleanBody.querySelectorAll('.ek-render-position-highlight, .ek-selected-figure').forEach((node) => {
       node.classList.remove('ek-render-position-highlight', 'ek-selected-figure');
     });
-    cleanBody.querySelectorAll<HTMLImageElement>('img[data-ek-src]').forEach((image) => {
-      image.setAttribute('src', image.dataset.ekSrc ?? '');
-      image.removeAttribute('data-ek-src');
-    });
 
     const nextHtml = buildHtmlOutput({
       bodyHtml: cleanBody.innerHTML,
@@ -284,22 +251,12 @@ export default function App() {
     setHtml(nextHtml);
   }, [validation.bodyAttributes, validation.headHtml, validation.isFullDocument]);
 
-
-  const saveImageFile = async (file: File): Promise<{ previewSrc: string; outputSrc: string; persisted: boolean; fileName?: string }> => {
-    const formData = new FormData();
-    formData.append('image', file);
-    try {
-      const response = await fetch(IMAGE_UPLOAD_ENDPOINT, { method: 'POST', body: formData });
-      if (!response.ok) throw new Error(await response.text() || 'Sauvegarde du fichier image impossible.');
-      const payload = await response.json() as { src?: string };
-      if (!payload.src || payload.src.startsWith('data:')) throw new Error('Le stockage image a renvoyé un chemin invalide.');
-      return { previewSrc: payload.src, outputSrc: payload.src, persisted: true };
-    } catch (error) {
-      const localReference = createLocalImageReference(file);
-      console.warn('Upload /api/images indisponible, insertion statique sans base64.', error);
-      return { ...localReference, persisted: false };
-    }
-  };
+  const readImageAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Lecture de l’image impossible.'));
+    reader.onerror = () => reject(reader.error ?? new Error('Lecture de l’image impossible.'));
+    reader.readAsDataURL(file);
+  });
 
   const insertImageFile = useCallback(async (file: File) => {
     if (!isSupportedImageFile(file)) {
@@ -308,21 +265,12 @@ export default function App() {
     }
     const iframeDocument = previewRef.current?.contentDocument;
     if (!visualEditing || !iframeDocument?.body) return;
-    let imageReference: Awaited<ReturnType<typeof saveImageFile>>;
+    let imageSrc = '';
     try {
-      // Sauvegarde fichier : en dev/preview local, l’image est envoyée au middleware Vite,
-      // qui écrit le fichier dans public/images. Sur un hébergement statique (GitHub Pages),
-      // POST /api/images n’existe pas : on affiche alors un aperçu blob local, tandis que
-      // le HTML final garde un chemin relatif images/nom.ext sans base64.
-      imageReference = await saveImageFile(file);
+      imageSrc = await readImageAsDataUrl(file);
     } catch (error) {
-      setSyncStatus(error instanceof Error ? `Insertion refusée — ${error.message}` : 'Insertion refusée — sauvegarde image impossible');
+      setSyncStatus(error instanceof Error ? `Insertion refusée — ${error.message}` : 'Insertion refusée — lecture image impossible');
       return;
-    }
-    if (!imageReference.persisted) {
-      void storeLocalImage(imageReference.outputSrc, file).catch((storageError) => {
-        console.warn('Persistance IndexedDB indisponible, aperçu conservé pour la session courante uniquement.', storageError);
-      });
     }
     iframeDocument.body.focus();
     const selection = iframeDocument.getSelection();
@@ -338,10 +286,7 @@ export default function App() {
     const figure = iframeDocument.createElement('figure');
     figure.className = 'article-figure figure-medium';
     const image = iframeDocument.createElement('img');
-    // Insertion HTML : seul le chemin relatif sauvegardé est écrit dans l’attribut src.
-    // On utilise setAttribute pour éviter que le navigateur ne sérialise une URL absolue.
-    image.setAttribute('src', imageReference.previewSrc);
-    image.setAttribute('data-ek-src', imageReference.outputSrc);
+    image.setAttribute('src', imageSrc);
     image.alt = '';
     const caption = iframeDocument.createElement('figcaption');
     caption.contentEditable = 'true';
@@ -361,9 +306,7 @@ export default function App() {
     savedPreviewRange.current = nextRange.cloneRange();
     selectFigure(figure);
     updateFromPreview();
-    setSyncStatus(imageReference.persisted
-      ? `Image enregistrée et insérée : ${imageReference.outputSrc}`
-      : `Image insérée sans base64 : copiez aussi le fichier dans ${LOCAL_IMAGE_DIRECTORY}/${imageReference.fileName}`);
+    setSyncStatus('Image insérée en base64 dans le HTML.');
   }, [selectFigure, updateFromPreview, visualEditing]);
 
   const setFigureWidth = useCallback((width: FigureWidth) => {
@@ -419,18 +362,6 @@ ${validation.headHtml}
 </html>`);
     iframeDocument.close();
 
-    iframeDocument.querySelectorAll<HTMLImageElement>(`img[src^="${LOCAL_IMAGE_DIRECTORY}/"]`).forEach((image) => {
-      const outputSrc = image.getAttribute('src');
-      if (!outputSrc) return;
-      void getLocalImagePreviewSrc(outputSrc).then((previewSrc) => {
-        if (!previewSrc || !iframeDocument.body.contains(image)) return;
-        image.setAttribute('data-ek-src', outputSrc);
-        image.setAttribute('src', previewSrc);
-      }).catch((error) => {
-        console.warn('Aperçu local introuvable pour l’image insérée.', error);
-      });
-    });
-
     const handleInput = () => updateFromPreview();
     const handlePointerOrSelection = (event?: Event) => {
       rememberPreviewSelection();
@@ -478,7 +409,6 @@ ${validation.headHtml}
     };
   }, [deleteSelectedFigure, getSelectedFigure, insertImageFile, rememberPreviewSelection, selectFigure, syncFromPreviewSelection, updateFromPreview, validation.bodyAttributes, validation.bodyHtml, validation.headHtml, visualEditing]);
 
-
   useEffect(() => {
     const iframeDocument = previewRef.current?.contentDocument;
     if (!iframeDocument?.body) return;
@@ -494,10 +424,12 @@ ${validation.headHtml}
 
   const copyHtml = async () => {
     await navigator.clipboard.writeText(sanitizeEditableHtml(html).safeHtml);
+    setSyncStatus('HTML copié dans le presse-papiers');
   };
 
   const downloadHtml = () => {
-    const blob = new Blob([sanitizeEditableHtml(html).safeHtml], { type: 'text/html;charset=utf-8' });
+    const safeHtml = sanitizeEditableHtml(html).safeHtml;
+    const blob = new Blob([safeHtml], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
