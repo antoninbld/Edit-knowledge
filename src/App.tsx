@@ -11,6 +11,7 @@ const HIGHLIGHT_DURATION = 2200;
 const IMAGE_FILE_PATTERN = /^image\/(png|jpeg|webp|gif)$/;
 const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|webp|gif)$/i;
 const FIGURE_WIDTH_CLASSES = ['figure-small', 'figure-medium', 'figure-large', 'figure-full'];
+const IMAGE_UPLOAD_ENDPOINT = '/api/images';
 type FigureWidth = 'small' | 'medium' | 'large' | 'full';
 
 function isSupportedImageFile(file: File): boolean {
@@ -252,12 +253,15 @@ export default function App() {
   }, [validation.bodyAttributes, validation.headHtml, validation.isFullDocument]);
 
 
-  const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error('Lecture du fichier impossible.'));
-    reader.readAsDataURL(file);
-  });
+  const saveImageFile = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append('image', file);
+    const response = await fetch(IMAGE_UPLOAD_ENDPOINT, { method: 'POST', body: formData });
+    if (!response.ok) throw new Error(await response.text() || 'Sauvegarde du fichier image impossible.');
+    const payload = await response.json() as { src?: string };
+    if (!payload.src || payload.src.startsWith('data:')) throw new Error('Le stockage image a renvoyé un chemin invalide.');
+    return payload.src;
+  };
 
   const insertImageFile = useCallback(async (file: File) => {
     if (!isSupportedImageFile(file)) {
@@ -266,7 +270,15 @@ export default function App() {
     }
     const iframeDocument = previewRef.current?.contentDocument;
     if (!visualEditing || !iframeDocument?.body) return;
-    const dataUrl = await fileToDataUrl(file);
+    let imageSrc = '';
+    try {
+      // Sauvegarde fichier : l’image est envoyée au middleware local Vite, qui écrit le fichier
+      // dans public/images et renvoie uniquement un chemin relatif du type images/nom.png.
+      imageSrc = await saveImageFile(file);
+    } catch (error) {
+      setSyncStatus(error instanceof Error ? `Insertion refusée — ${error.message}` : 'Insertion refusée — sauvegarde image impossible');
+      return;
+    }
     iframeDocument.body.focus();
     const selection = iframeDocument.getSelection();
     selection?.removeAllRanges();
@@ -281,7 +293,9 @@ export default function App() {
     const figure = iframeDocument.createElement('figure');
     figure.className = 'article-figure figure-medium';
     const image = iframeDocument.createElement('img');
-    image.src = dataUrl;
+    // Insertion HTML : seul le chemin relatif sauvegardé est écrit dans l’attribut src.
+    // On utilise setAttribute pour éviter que le navigateur ne sérialise une URL absolue.
+    image.setAttribute('src', imageSrc);
     image.alt = '';
     const caption = iframeDocument.createElement('figcaption');
     caption.contentEditable = 'true';
@@ -301,7 +315,7 @@ export default function App() {
     savedPreviewRange.current = nextRange.cloneRange();
     selectFigure(figure);
     updateFromPreview();
-    setSyncStatus(`Image insérée : ${file.name}`);
+    setSyncStatus(`Image enregistrée et insérée : ${imageSrc}`);
   }, [selectFigure, updateFromPreview, visualEditing]);
 
   const setFigureWidth = useCallback((width: FigureWidth) => {
@@ -335,7 +349,7 @@ export default function App() {
 <html>
 <head>
 <meta charset="utf-8">
-<base target="_blank">
+<base href="${window.location.origin}${import.meta.env.BASE_URL}" target="_blank">
 ${validation.headHtml}
 <style>
   html { background: transparent; scroll-behavior: smooth; }
