@@ -55,5 +55,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
         with:
-          timeout: 900000
+          # actions/deploy-pages caps this polling timeout at 600000 ms.
+          # A higher value only produces a warning and is ignored.
+          timeout: 600000
           error_count: 30

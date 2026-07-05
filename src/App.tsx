@@ -12,6 +12,10 @@ const IMAGE_FILE_PATTERN = /^image\/(png|jpeg|webp|gif)$/;
 const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|webp|gif)$/i;
 const FIGURE_WIDTH_CLASSES = ['figure-small', 'figure-medium', 'figure-large', 'figure-full'];
 const IMAGE_UPLOAD_ENDPOINT = '/api/images';
+const LOCAL_IMAGE_DIRECTORY = 'images';
+const LOCAL_IMAGE_DB_NAME = 'edit-knowledge-images';
+const LOCAL_IMAGE_STORE_NAME = 'images';
+const localImagePreviewUrls = new Map<string, string>();
 type FigureWidth = 'small' | 'medium' | 'large' | 'full';
 
 function isSupportedImageFile(file: File): boolean {
@@ -20,6 +24,72 @@ function isSupportedImageFile(file: File): boolean {
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function cleanImageName(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\.[^.]+$/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 42) || 'image';
+}
+
+function getImageExtension(file: File): string {
+  const mimeExtension = file.type === 'image/jpeg' ? 'jpg' : file.type.replace('image/', '');
+  const fileExtension = file.name.match(/\.(png|jpe?g|webp|gif)$/i)?.[1]?.toLowerCase().replace('jpeg', 'jpg');
+  return ['png', 'jpg', 'webp', 'gif'].includes(mimeExtension) ? mimeExtension : fileExtension || 'png';
+}
+
+function createLocalImageReference(file: File): { previewSrc: string; outputSrc: string; fileName: string } {
+  const fileName = `${cleanImageName(file.name)}-${Date.now().toString(36)}.${getImageExtension(file)}`;
+  const outputSrc = `${LOCAL_IMAGE_DIRECTORY}/${fileName}`;
+  const previewSrc = URL.createObjectURL(file);
+  localImagePreviewUrls.set(outputSrc, previewSrc);
+  return { previewSrc, outputSrc, fileName };
+}
+
+function openLocalImageDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(LOCAL_IMAGE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(LOCAL_IMAGE_STORE_NAME);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error('Ouverture du stockage image local impossible.'));
+  });
+}
+
+async function storeLocalImage(outputSrc: string, file: File): Promise<void> {
+  const database = await openLocalImageDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(LOCAL_IMAGE_STORE_NAME, 'readwrite');
+    transaction.objectStore(LOCAL_IMAGE_STORE_NAME).put(file, outputSrc);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error('Enregistrement local de l’image impossible.'));
+  });
+  database.close();
+}
+
+async function getLocalImagePreviewSrc(outputSrc: string): Promise<string | null> {
+  const existingPreviewSrc = localImagePreviewUrls.get(outputSrc);
+  if (existingPreviewSrc) return existingPreviewSrc;
+
+  const database = await openLocalImageDatabase();
+  const blob = await new Promise<Blob | undefined>((resolve, reject) => {
+    const transaction = database.transaction(LOCAL_IMAGE_STORE_NAME, 'readonly');
+    const request = transaction.objectStore(LOCAL_IMAGE_STORE_NAME).get(outputSrc);
+    request.onsuccess = () => resolve(request.result as Blob | undefined);
+    request.onerror = () => reject(request.error ?? new Error('Lecture locale de l’image impossible.'));
+  });
+  database.close();
+  if (!blob) return null;
+
+  const previewSrc = URL.createObjectURL(blob);
+  localImagePreviewUrls.set(outputSrc, previewSrc);
+  return previewSrc;
 }
 
 function normalizeText(value: string): string {
@@ -238,6 +308,10 @@ export default function App() {
     cleanBody.querySelectorAll('.ek-render-position-highlight, .ek-selected-figure').forEach((node) => {
       node.classList.remove('ek-render-position-highlight', 'ek-selected-figure');
     });
+    cleanBody.querySelectorAll<HTMLImageElement>('img[data-ek-src]').forEach((image) => {
+      image.setAttribute('src', image.dataset.ekSrc ?? '');
+      image.removeAttribute('data-ek-src');
+    });
 
     const nextHtml = buildHtmlOutput({
       bodyHtml: cleanBody.innerHTML,
@@ -253,14 +327,23 @@ export default function App() {
   }, [validation.bodyAttributes, validation.headHtml, validation.isFullDocument]);
 
 
-  const saveImageFile = async (file: File): Promise<string> => {
+  const saveImageFile = async (file: File): Promise<{ previewSrc: string; outputSrc: string; persisted: boolean; fileName?: string }> => {
     const formData = new FormData();
     formData.append('image', file);
-    const response = await fetch(IMAGE_UPLOAD_ENDPOINT, { method: 'POST', body: formData });
-    if (!response.ok) throw new Error(await response.text() || 'Sauvegarde du fichier image impossible.');
-    const payload = await response.json() as { src?: string };
-    if (!payload.src || payload.src.startsWith('data:')) throw new Error('Le stockage image a renvoyé un chemin invalide.');
-    return payload.src;
+    try {
+      const response = await fetch(IMAGE_UPLOAD_ENDPOINT, { method: 'POST', body: formData });
+      if (!response.ok) throw new Error(await response.text() || 'Sauvegarde du fichier image impossible.');
+      const payload = await response.json() as { src?: string };
+      if (!payload.src || payload.src.startsWith('data:')) throw new Error('Le stockage image a renvoyé un chemin invalide.');
+      return { previewSrc: payload.src, outputSrc: payload.src, persisted: true };
+    } catch (error) {
+      const localReference = createLocalImageReference(file);
+      await storeLocalImage(localReference.outputSrc, file).catch((storageError) => {
+        console.warn('Persistance IndexedDB indisponible, aperçu conservé pour la session courante uniquement.', storageError);
+      });
+      console.warn('Upload /api/images indisponible, insertion statique sans base64.', error);
+      return { ...localReference, persisted: false };
+    }
   };
 
   const insertImageFile = useCallback(async (file: File) => {
@@ -270,11 +353,13 @@ export default function App() {
     }
     const iframeDocument = previewRef.current?.contentDocument;
     if (!visualEditing || !iframeDocument?.body) return;
-    let imageSrc = '';
+    let imageReference: Awaited<ReturnType<typeof saveImageFile>>;
     try {
-      // Sauvegarde fichier : l’image est envoyée au middleware local Vite, qui écrit le fichier
-      // dans public/images et renvoie uniquement un chemin relatif du type images/nom.png.
-      imageSrc = await saveImageFile(file);
+      // Sauvegarde fichier : en dev/preview local, l’image est envoyée au middleware Vite,
+      // qui écrit le fichier dans public/images. Sur un hébergement statique (GitHub Pages),
+      // POST /api/images n’existe pas : on affiche alors un aperçu blob local, tandis que
+      // le HTML final garde un chemin relatif images/nom.ext sans base64.
+      imageReference = await saveImageFile(file);
     } catch (error) {
       setSyncStatus(error instanceof Error ? `Insertion refusée — ${error.message}` : 'Insertion refusée — sauvegarde image impossible');
       return;
@@ -295,7 +380,8 @@ export default function App() {
     const image = iframeDocument.createElement('img');
     // Insertion HTML : seul le chemin relatif sauvegardé est écrit dans l’attribut src.
     // On utilise setAttribute pour éviter que le navigateur ne sérialise une URL absolue.
-    image.setAttribute('src', imageSrc);
+    image.setAttribute('src', imageReference.previewSrc);
+    image.setAttribute('data-ek-src', imageReference.outputSrc);
     image.alt = '';
     const caption = iframeDocument.createElement('figcaption');
     caption.contentEditable = 'true';
@@ -315,7 +401,9 @@ export default function App() {
     savedPreviewRange.current = nextRange.cloneRange();
     selectFigure(figure);
     updateFromPreview();
-    setSyncStatus(`Image enregistrée et insérée : ${imageSrc}`);
+    setSyncStatus(imageReference.persisted
+      ? `Image enregistrée et insérée : ${imageReference.outputSrc}`
+      : `Image insérée sans base64 : copiez aussi le fichier dans ${LOCAL_IMAGE_DIRECTORY}/${imageReference.fileName}`);
   }, [selectFigure, updateFromPreview, visualEditing]);
 
   const setFigureWidth = useCallback((width: FigureWidth) => {
@@ -370,6 +458,18 @@ ${validation.headHtml}
 <body${validation.bodyAttributes ? ` ${validation.bodyAttributes}` : ''} contenteditable="${visualEditing ? 'true' : 'false'}">${validation.bodyHtml}</body>
 </html>`);
     iframeDocument.close();
+
+    iframeDocument.querySelectorAll<HTMLImageElement>(`img[src^="${LOCAL_IMAGE_DIRECTORY}/"]`).forEach((image) => {
+      const outputSrc = image.getAttribute('src');
+      if (!outputSrc) return;
+      void getLocalImagePreviewSrc(outputSrc).then((previewSrc) => {
+        if (!previewSrc || !iframeDocument.body.contains(image)) return;
+        image.setAttribute('data-ek-src', outputSrc);
+        image.setAttribute('src', previewSrc);
+      }).catch((error) => {
+        console.warn('Aperçu local introuvable pour l’image insérée.', error);
+      });
+    });
 
     const handleInput = () => updateFromPreview();
     const handlePointerOrSelection = (event?: Event) => {
