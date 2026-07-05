@@ -9,6 +9,10 @@ type Props = {
   onFormat: () => void;
   onMinify: () => void;
   onCommand: (command: string, value?: string) => void;
+  onInsertImage: (file: File) => void;
+  selectedFigureWidth: string | null;
+  onSetFigureWidth: (width: 'small' | 'medium' | 'large' | 'full') => void;
+  onDeleteFigure: () => void;
 };
 
 export function Toolbar(props: Props) {
@@ -30,6 +34,13 @@ export function Toolbar(props: Props) {
       <button title="Liste" onClick={() => props.onCommand('insertUnorderedList')}><span>•</span></button>
       <button title="Liste numérotée" onClick={() => props.onCommand('insertOrderedList')}><span>1.</span></button>
       <button title="Lien" onClick={() => { const url = window.prompt('URL du lien'); if (url) props.onCommand('createLink', url); }}><span>🔗</span></button>
+      <label className="file-button image-insert-button" title="Insérer une image au curseur">Insérer une image<input type="file" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" onChange={(e) => { const file = e.target.files?.[0]; if (file) props.onInsertImage(file); e.currentTarget.value = ''; }} /></label>
+      <span className="divider" />
+      <button disabled={!props.selectedFigureWidth} className={props.selectedFigureWidth === 'small' ? 'active' : ''} title="Image petite" onClick={() => props.onSetFigureWidth('small')}>Image S</button>
+      <button disabled={!props.selectedFigureWidth} className={props.selectedFigureWidth === 'medium' ? 'active' : ''} title="Image moyenne" onClick={() => props.onSetFigureWidth('medium')}>Image M</button>
+      <button disabled={!props.selectedFigureWidth} className={props.selectedFigureWidth === 'large' ? 'active' : ''} title="Image large" onClick={() => props.onSetFigureWidth('large')}>Image L</button>
+      <button disabled={!props.selectedFigureWidth} className={props.selectedFigureWidth === 'full' ? 'active' : ''} title="Image pleine largeur" onClick={() => props.onSetFigureWidth('full')}>100%</button>
+      <button disabled={!props.selectedFigureWidth} title="Supprimer l’image sélectionnée" onClick={props.onDeleteFigure}>Supprimer l’image</button>
     </header>
   );
 }

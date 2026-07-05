@@ -11,6 +11,8 @@ body { margin: 0; min-width: 980px; }
   color: #f8fafc; cursor: pointer; display: inline-flex; gap: 7px; font: inherit; padding: 9px 12px;
 }
 .toolbar button:hover, .toolbar .file-button:hover { background: #2c3448; }
+.toolbar button:disabled { cursor: not-allowed; opacity: .42; }
+.toolbar button:disabled:hover { background: #222838; }
 .toolbar button.active { background: #22543d; border-color: #38a169; }
 .toolbar .file-button input { display: none; }
 .app-shell { display: flex; flex-direction: column; height: 100vh; }

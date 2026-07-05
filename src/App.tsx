@@ -8,6 +8,14 @@ type RenderContext = { text: string; parentText: string; ratio: number };
 
 const MAX_CONTEXT_LENGTH = 180;
 const HIGHLIGHT_DURATION = 2200;
+const IMAGE_FILE_PATTERN = /^image\/(png|jpeg|webp|gif)$/;
+const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|webp|gif)$/i;
+const FIGURE_WIDTH_CLASSES = ['figure-small', 'figure-medium', 'figure-large', 'figure-full'];
+type FigureWidth = 'small' | 'medium' | 'large' | 'full';
+
+function isSupportedImageFile(file: File): boolean {
+  return IMAGE_FILE_PATTERN.test(file.type) || IMAGE_EXTENSION_PATTERN.test(file.name);
+}
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -112,11 +120,13 @@ export default function App() {
   const [sourceMatch, setSourceMatch] = useState<SourceMatch | null>(null);
   const [positionStatus, setPositionStatus] = useState('Cliquez dans le rendu ou le code pour synchroniser la position.');
   const [syncStatus, setSyncStatus] = useState('Synchronisation active');
+  const [selectedFigureWidth, setSelectedFigureWidth] = useState<FigureWidth | null>(null);
   const previewRef = useRef<HTMLIFrameElement>(null);
   const sourceRef = useRef<HTMLTextAreaElement>(null);
   const sourceOverlayRef = useRef<HTMLPreElement>(null);
   const highlightTimer = useRef<number | undefined>(undefined);
   const renderHighlightTimer = useRef<number | undefined>(undefined);
+  const savedPreviewRange = useRef<Range | null>(null);
   const skipNextPreviewWrite = useRef(false);
   const htmlRef = useRef(html);
   const validation = useMemo(() => sanitizeEditableHtml(html), [html]);
@@ -172,6 +182,35 @@ export default function App() {
     else setPositionStatus('Correspondance non trouvée dans le HTML source.');
   }, [revealSourceMatch]);
 
+
+  const rememberPreviewSelection = useCallback(() => {
+    const iframeDocument = previewRef.current?.contentDocument;
+    const selection = iframeDocument?.getSelection();
+    if (!iframeDocument?.body || !selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const container = range.commonAncestorContainer;
+    if (iframeDocument.body.contains(container.nodeType === Node.ELEMENT_NODE ? container as Element : container.parentElement)) {
+      savedPreviewRange.current = range.cloneRange();
+    }
+  }, []);
+
+  const getSelectedFigure = useCallback((): HTMLElement | null => {
+    const iframeDocument = previewRef.current?.contentDocument;
+    return iframeDocument?.querySelector<HTMLElement>('.article-figure.ek-selected-figure') ?? null;
+  }, []);
+
+  const selectFigure = useCallback((figure: HTMLElement | null) => {
+    const iframeDocument = previewRef.current?.contentDocument;
+    iframeDocument?.querySelectorAll('.article-figure.ek-selected-figure').forEach((node) => node.classList.remove('ek-selected-figure'));
+    if (!figure) {
+      setSelectedFigureWidth(null);
+      return;
+    }
+    figure.classList.add('ek-selected-figure');
+    const width = FIGURE_WIDTH_CLASSES.find((className) => figure.classList.contains(className))?.replace('figure-', '') as FigureWidth | undefined;
+    setSelectedFigureWidth(width ?? 'medium');
+  }, []);
+
   const syncPreviewFromSource = useCallback((cursor: number) => {
     const iframeDocument = previewRef.current?.contentDocument;
     if (!iframeDocument?.body) return;
@@ -194,12 +233,13 @@ export default function App() {
     const iframeDocument = previewRef.current?.contentDocument;
     if (!iframeDocument?.body) return;
 
-    iframeDocument.querySelectorAll('.ek-render-position-highlight').forEach((node) => {
-      node.classList.remove('ek-render-position-highlight');
+    const cleanBody = iframeDocument.body.cloneNode(true) as HTMLElement;
+    cleanBody.querySelectorAll('.ek-render-position-highlight, .ek-selected-figure').forEach((node) => {
+      node.classList.remove('ek-render-position-highlight', 'ek-selected-figure');
     });
 
     const nextHtml = buildHtmlOutput({
-      bodyHtml: iframeDocument.body.innerHTML,
+      bodyHtml: cleanBody.innerHTML,
       bodyAttributes: validation.bodyAttributes,
       headHtml: validation.headHtml,
       isFullDocument: validation.isFullDocument,
@@ -210,6 +250,76 @@ export default function App() {
     setSyncStatus('Synchronisation active — dernière modification visuelle intégrée');
     setHtml(nextHtml);
   }, [validation.bodyAttributes, validation.headHtml, validation.isFullDocument]);
+
+
+  const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error('Lecture du fichier impossible.'));
+    reader.readAsDataURL(file);
+  });
+
+  const insertImageFile = useCallback(async (file: File) => {
+    if (!isSupportedImageFile(file)) {
+      setSyncStatus('Insertion refusée — choisissez une image png, jpg, jpeg, webp ou gif');
+      return;
+    }
+    const iframeDocument = previewRef.current?.contentDocument;
+    if (!visualEditing || !iframeDocument?.body) return;
+    const dataUrl = await fileToDataUrl(file);
+    iframeDocument.body.focus();
+    const selection = iframeDocument.getSelection();
+    selection?.removeAllRanges();
+    if (savedPreviewRange.current) selection?.addRange(savedPreviewRange.current);
+    else {
+      const range = iframeDocument.createRange();
+      range.selectNodeContents(iframeDocument.body);
+      range.collapse(false);
+      selection?.addRange(range);
+    }
+
+    const figure = iframeDocument.createElement('figure');
+    figure.className = 'article-figure figure-medium';
+    const image = iframeDocument.createElement('img');
+    image.src = dataUrl;
+    image.alt = '';
+    const caption = iframeDocument.createElement('figcaption');
+    caption.contentEditable = 'true';
+    caption.textContent = 'Ajouter une légende…';
+    figure.append(image, caption);
+
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    range?.deleteContents();
+    range?.insertNode(figure);
+    const spacer = iframeDocument.createTextNode('\u00a0');
+    figure.after(spacer);
+    const nextRange = iframeDocument.createRange();
+    nextRange.setStartAfter(spacer);
+    nextRange.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(nextRange);
+    savedPreviewRange.current = nextRange.cloneRange();
+    selectFigure(figure);
+    updateFromPreview();
+    setSyncStatus(`Image insérée : ${file.name}`);
+  }, [selectFigure, updateFromPreview, visualEditing]);
+
+  const setFigureWidth = useCallback((width: FigureWidth) => {
+    const figure = getSelectedFigure();
+    if (!figure) return;
+    figure.classList.remove(...FIGURE_WIDTH_CLASSES);
+    figure.classList.add(`figure-${width}`);
+    setSelectedFigureWidth(width);
+    updateFromPreview();
+  }, [getSelectedFigure, updateFromPreview]);
+
+  const deleteSelectedFigure = useCallback(() => {
+    const figure = getSelectedFigure();
+    if (!figure) return;
+    figure.remove();
+    setSelectedFigureWidth(null);
+    updateFromPreview();
+  }, [getSelectedFigure, updateFromPreview]);
 
   useEffect(() => {
     const iframeDocument = previewRef.current?.contentDocument;
@@ -232,6 +342,15 @@ ${validation.headHtml}
   body { min-height: 100vh; margin: 0; outline: none; }
   body[contenteditable="true"] { cursor: text; }
   .ek-render-position-highlight { outline: 3px solid rgba(250, 204, 21, .9) !important; background-color: rgba(250, 204, 21, .22) !important; transition: outline-color .2s ease, background-color .2s ease; }
+  .article-figure { margin: 1.4rem auto; max-width: 760px; width: min(100%, 760px); }
+  .article-figure.figure-small { max-width: 360px; }
+  .article-figure.figure-medium { max-width: 560px; }
+  .article-figure.figure-large { max-width: 760px; }
+  .article-figure.figure-full { max-width: 100%; width: 100%; }
+  .article-figure img { border-radius: 12px; display: block; height: auto; margin: 0 auto; max-width: 100%; }
+  .article-figure figcaption { color: #aab3c5; font-size: .9rem; line-height: 1.45; margin-top: .55rem; min-height: 1.3em; outline: none; text-align: center; }
+  .article-figure figcaption:empty::before { content: 'Ajouter une légende…'; color: #7f8ba3; font-style: italic; }
+  .article-figure.ek-selected-figure { outline: 2px solid rgba(96, 165, 250, .78); outline-offset: 8px; border-radius: 14px; }
 </style>
 </head>
 <body${validation.bodyAttributes ? ` ${validation.bodyAttributes}` : ''} contenteditable="${visualEditing ? 'true' : 'false'}">${validation.bodyHtml}</body>
@@ -239,10 +358,22 @@ ${validation.headHtml}
     iframeDocument.close();
 
     const handleInput = () => updateFromPreview();
-    const handlePointerOrSelection = () => window.setTimeout(syncFromPreviewSelection, 0);
+    const handlePointerOrSelection = (event?: Event) => {
+      rememberPreviewSelection();
+      if (event?.type !== 'selectionchange') {
+        const target = event?.target instanceof Element ? event.target : null;
+        selectFigure(target?.closest<HTMLElement>('.article-figure') ?? null);
+      }
+      window.setTimeout(syncFromPreviewSelection, 0);
+    };
     const handlePaste = (event: ClipboardEvent) => {
       if (!visualEditing) return;
       event.preventDefault();
+      const imageFile = [...(event.clipboardData?.files ?? [])].find(isSupportedImageFile);
+      if (imageFile) {
+        void insertImageFile(imageFile);
+        return;
+      }
       iframeDocument.execCommand('insertText', false, event.clipboardData?.getData('text/plain') ?? '');
       updateFromPreview();
     };
@@ -252,7 +383,14 @@ ${validation.headHtml}
     iframeDocument.body.addEventListener('click', handlePointerOrSelection);
     iframeDocument.body.addEventListener('keyup', handlePointerOrSelection);
     iframeDocument.addEventListener('selectionchange', handlePointerOrSelection);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.key === 'Delete' || event.key === 'Backspace') && getSelectedFigure()) {
+        event.preventDefault();
+        deleteSelectedFigure();
+      }
+    };
     iframeDocument.body.addEventListener('paste', handlePaste);
+    iframeDocument.body.addEventListener('keydown', handleKeyDown);
 
     return () => {
       if (skipNextPreviewWrite.current) return;
@@ -262,8 +400,10 @@ ${validation.headHtml}
       iframeDocument.body?.removeEventListener('keyup', handlePointerOrSelection);
       iframeDocument.removeEventListener('selectionchange', handlePointerOrSelection);
       iframeDocument.body?.removeEventListener('paste', handlePaste);
+      iframeDocument.body?.removeEventListener('keydown', handleKeyDown);
     };
-  }, [validation.bodyAttributes, validation.bodyHtml, validation.headHtml, visualEditing, updateFromPreview, syncFromPreviewSelection]);
+  }, [deleteSelectedFigure, getSelectedFigure, insertImageFile, rememberPreviewSelection, selectFigure, syncFromPreviewSelection, updateFromPreview, validation.bodyAttributes, validation.bodyHtml, validation.headHtml, visualEditing]);
+
 
   useEffect(() => {
     const iframeDocument = previewRef.current?.contentDocument;
@@ -328,6 +468,10 @@ ${validation.headHtml}
         onFormat={() => setHtml(formatHtml(html))}
         onMinify={() => setHtml(minifyHtml(html))}
         onCommand={runCommand}
+        onInsertImage={insertImageFile}
+        selectedFigureWidth={selectedFigureWidth}
+        onSetFigureWidth={setFigureWidth}
+        onDeleteFigure={deleteSelectedFigure}
       />
       <main className="workspace">
         <section className="pane code-pane" style={{ flexBasis: `${leftWidth}%` }}>
