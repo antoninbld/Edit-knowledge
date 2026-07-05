@@ -11,6 +11,7 @@ const HIGHLIGHT_DURATION = 2200;
 const IMAGE_FILE_PATTERN = /^image\/(png|jpeg|webp|gif)$/;
 const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|webp|gif)$/i;
 const FIGURE_WIDTH_CLASSES = ['figure-small', 'figure-medium', 'figure-large', 'figure-full'];
+const IMAGE_UPLOAD_ENDPOINT = '/api/images';
 type FigureWidth = 'small' | 'medium' | 'large' | 'full';
 
 function isSupportedImageFile(file: File): boolean {
