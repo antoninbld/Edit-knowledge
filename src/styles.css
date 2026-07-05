@@ -1,0 +1,55 @@
+:root {
+  color: #e5e7eb;
+  background: #10131a;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 980px; }
+button, .file-button {
+  align-items: center; background: #222838; border: 1px solid #394155; border-radius: 10px;
+  color: #f8fafc; cursor: pointer; display: inline-flex; gap: 7px; font: inherit; padding: 9px 12px;
+}
+button:hover, .file-button:hover { background: #2c3448; }
+button.active { background: #22543d; border-color: #38a169; }
+.file-button input { display: none; }
+.app-shell { display: flex; flex-direction: column; height: 100vh; }
+.toolbar {
+  align-items: center; background: rgba(16, 19, 26, .96); border-bottom: 1px solid #2d3445;
+  display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px;
+}
+.brand { align-items: center; color: #fff; display: flex; font-weight: 800; gap: 8px; margin-right: 10px; }
+.divider { background: #3a4257; height: 30px; margin: 0 4px; width: 1px; }
+.workspace { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.pane { display: flex; flex-direction: column; min-width: 0; }
+.pane-header {
+  align-items: center; background: #171b25; border-bottom: 1px solid #2d3445; color: #aeb8cc;
+  display: flex; justify-content: space-between; padding: 10px 14px;
+}
+.code-pane textarea {
+  background: #0b0e14; border: 0; color: #dbeafe; flex: 1; font: 14px/1.55 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  outline: none; padding: 18px; resize: none; tab-size: 2; white-space: pre; overflow: auto;
+}
+.resize-handle { background: #2d3445; cursor: col-resize; width: 7px; }
+.resize-handle:hover { background: #60a5fa; }
+.visual-pane { background: #111827; }
+.reader-frame { flex: 1; overflow: auto; padding: 28px; }
+.editable-document {
+  background: #f8fafc; border-radius: 18px; box-shadow: 0 20px 70px rgba(0,0,0,.32); color: #172033;
+  line-height: 1.65; margin: 0 auto; max-width: 880px; min-height: calc(100% - 20px); outline: none; padding: 42px 52px;
+}
+.editable-document:focus { box-shadow: 0 0 0 3px rgba(96, 165, 250, .45), 0 20px 70px rgba(0,0,0,.32); }
+.editable-document h1, .editable-document h2, .editable-document h3 { line-height: 1.2; margin: 1.4em 0 .55em; }
+.editable-document h1 { font-size: 2.25rem; margin-top: 0; }
+.editable-document h2 { color: #1e3a8a; font-size: 1.45rem; }
+.editable-document p, .editable-document li { font-size: 1.04rem; }
+.editable-document a { color: #2563eb; }
+.editable-document img { border-radius: 12px; height: auto; max-width: 100%; }
+.editable-document section, .editable-document .bloc { border-left: 4px solid #dbeafe; margin: 24px 0; padding-left: 20px; }
+.editable-document .lead { color: #475569; font-size: 1.2rem; }
+.editable-document .eyebrow { color: #64748b; font-size: .82rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
+.status { border-radius: 999px; padding: 4px 10px; }
+.status.synchronized { background: #123f2b; color: #bbf7d0; }
+.status.warning { background: #4a2d12; color: #fed7aa; }
+.notes { background: #11151f; border-top: 1px solid #2d3445; color: #aeb8cc; font-size: .92rem; padding: 10px 16px; }
+@media (max-width: 1100px) { body { min-width: 760px; } .toolbar { gap: 6px; } button, .file-button { padding: 8px 10px; } }
