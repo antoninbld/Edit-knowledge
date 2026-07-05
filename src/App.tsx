@@ -315,14 +315,14 @@ export default function App() {
       // POST /api/images n’existe pas : on affiche alors un aperçu blob local, tandis que
       // le HTML final garde un chemin relatif images/nom.ext sans base64.
       imageReference = await saveImageFile(file);
-      if (!imageReference.persisted) {
-        await storeLocalImage(imageReference.outputSrc, file).catch((storageError) => {
-          console.warn('Persistance IndexedDB indisponible, aperçu conservé pour la session courante uniquement.', storageError);
-        });
-      }
     } catch (error) {
       setSyncStatus(error instanceof Error ? `Insertion refusée — ${error.message}` : 'Insertion refusée — sauvegarde image impossible');
       return;
+    }
+    if (!imageReference.persisted) {
+      void storeLocalImage(imageReference.outputSrc, file).catch((storageError) => {
+        console.warn('Persistance IndexedDB indisponible, aperçu conservé pour la session courante uniquement.', storageError);
+      });
     }
     iframeDocument.body.focus();
     const selection = iframeDocument.getSelection();
