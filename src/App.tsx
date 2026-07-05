@@ -1,36 +1,84 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Toolbar } from './components/Toolbar';
-import { exampleHtml, formatHtml, minifyHtml, sanitizeEditableHtml } from './utils/html';
+import { buildHtmlOutput, exampleHtml, formatHtml, minifyHtml, sanitizeEditableHtml } from './utils/html';
 import './styles.css';
 
 export default function App() {
   const [html, setHtml] = useState(exampleHtml);
   const [visualEditing, setVisualEditing] = useState(true);
   const [leftWidth, setLeftWidth] = useState(48);
-  const previewRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLIFrameElement>(null);
   const isVisualSync = useRef(false);
   const validation = useMemo(() => sanitizeEditableHtml(html), [html]);
 
-  useEffect(() => {
-    if (!previewRef.current || isVisualSync.current) return;
-    if (previewRef.current.innerHTML !== validation.safeHtml) previewRef.current.innerHTML = validation.safeHtml;
-  }, [validation.safeHtml]);
+  const updateFromPreview = useCallback(() => {
+    const iframeDocument = previewRef.current?.contentDocument;
+    if (!iframeDocument) return;
 
-  const updateFromPreview = () => {
-    if (!previewRef.current) return;
     isVisualSync.current = true;
-    setHtml(previewRef.current.innerHTML);
+    setHtml(buildHtmlOutput({
+      bodyHtml: iframeDocument.body.innerHTML,
+      bodyAttributes: validation.bodyAttributes,
+      headHtml: validation.headHtml,
+      isFullDocument: validation.isFullDocument,
+    }));
     window.setTimeout(() => { isVisualSync.current = false; }, 0);
-  };
+  }, [validation.bodyAttributes, validation.headHtml, validation.isFullDocument]);
+
+  useEffect(() => {
+    const iframeDocument = previewRef.current?.contentDocument;
+    if (!iframeDocument || isVisualSync.current) return;
+
+    iframeDocument.open();
+    iframeDocument.write(`<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<base target="_blank">
+${validation.headHtml}
+<style>
+  html { background: transparent; }
+  body { min-height: 100vh; margin: 0; outline: none; }
+  body[contenteditable="true"] { cursor: text; }
+</style>
+</head>
+<body${validation.bodyAttributes ? ` ${validation.bodyAttributes}` : ''} contenteditable="${visualEditing ? 'true' : 'false'}">${validation.bodyHtml}</body>
+</html>`);
+    iframeDocument.close();
+
+    const handleInput = () => updateFromPreview();
+    const handlePaste = (event: ClipboardEvent) => {
+      if (!visualEditing) return;
+      event.preventDefault();
+      iframeDocument.execCommand('insertText', false, event.clipboardData?.getData('text/plain') ?? '');
+      updateFromPreview();
+    };
+
+    iframeDocument.body.addEventListener('input', handleInput);
+    iframeDocument.body.addEventListener('blur', handleInput);
+    iframeDocument.body.addEventListener('paste', handlePaste);
+
+    return () => {
+      iframeDocument.body?.removeEventListener('input', handleInput);
+      iframeDocument.body?.removeEventListener('blur', handleInput);
+      iframeDocument.body?.removeEventListener('paste', handlePaste);
+    };
+  }, [validation.bodyAttributes, validation.bodyHtml, validation.headHtml, visualEditing, updateFromPreview]);
+
+  useEffect(() => {
+    const iframeDocument = previewRef.current?.contentDocument;
+    if (!iframeDocument?.body) return;
+    iframeDocument.body.contentEditable = String(visualEditing);
+  }, [visualEditing]);
 
   const loadFile = async (file: File) => setHtml(await file.text());
 
   const copyHtml = async () => {
-    await navigator.clipboard.writeText(html);
+    await navigator.clipboard.writeText(sanitizeEditableHtml(html).safeHtml);
   };
 
   const downloadHtml = () => {
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const blob = new Blob([sanitizeEditableHtml(html).safeHtml], { type: 'text/html;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -40,9 +88,10 @@ export default function App() {
   };
 
   const runCommand = (command: string, value?: string) => {
-    if (!visualEditing || !previewRef.current) return;
-    previewRef.current.focus();
-    document.execCommand(command, false, value);
+    const iframeDocument = previewRef.current?.contentDocument;
+    if (!visualEditing || !iframeDocument?.body) return;
+    iframeDocument.body.focus();
+    iframeDocument.execCommand(command, false, value);
     updateFromPreview();
   };
 
@@ -82,27 +131,14 @@ export default function App() {
         </section>
         <div className="resize-handle" onPointerDown={startResize} title="Redimensionner" />
         <section className="pane visual-pane" style={{ flexBasis: `${100 - leftWidth}%` }}>
-          <div className="pane-header"><strong>Rendu éditable</strong><span className={`status ${validation.status}`}>{validation.message}</span></div>
+          <div className="pane-header"><strong>Rendu éditable isolé</strong><span className={`status ${validation.status}`}>{validation.message}</span></div>
           <div className="reader-frame">
-            <div
-              ref={previewRef}
-              className="editable-document"
-              contentEditable={visualEditing}
-              suppressContentEditableWarning
-              onInput={updateFromPreview}
-              onBlur={updateFromPreview}
-              onPaste={(event) => {
-                event.preventDefault();
-                const text = event.clipboardData.getData('text/plain');
-                document.execCommand('insertText', false, text);
-                updateFromPreview();
-              }}
-            />
+            <iframe ref={previewRef} className="editable-document-frame" title="Rendu HTML éditable isolé" sandbox="allow-same-origin" />
           </div>
         </section>
       </main>
       <footer className="notes">
-        <strong>Limites :</strong> l’édition visuelle conserve les balises et classes existantes tant que les changements restent textuels ou structurels simples. Les mises en page très complexes, scripts et attributs événementiels sont neutralisés pour limiter les risques côté rendu local.
+        <strong>Limites :</strong> l’édition visuelle conserve les balises, styles et classes existants tant que les changements restent textuels ou structurels simples. Les mises en page très complexes, scripts et attributs événementiels sont neutralisés pour limiter les risques côté rendu local.
       </footer>
     </div>
   );
