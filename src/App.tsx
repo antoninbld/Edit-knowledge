@@ -114,8 +114,8 @@ export default function App() {
   const previewRef = useRef<HTMLIFrameElement>(null);
   const sourceRef = useRef<HTMLTextAreaElement>(null);
   const sourceOverlayRef = useRef<HTMLPreElement>(null);
-  const highlightTimer = useRef<number | undefined>();
-  const renderHighlightTimer = useRef<number | undefined>();
+  const highlightTimer = useRef<number | undefined>(undefined);
+  const renderHighlightTimer = useRef<number | undefined>(undefined);
   const isVisualSync = useRef(false);
   const validation = useMemo(() => sanitizeEditableHtml(html), [html]);
 
