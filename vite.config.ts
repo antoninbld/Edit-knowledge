@@ -47,49 +47,55 @@ function parseMultipartImage(body: Buffer, contentType = '') {
   };
 }
 
+function handleImageUpload(request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse) {
+  if (request.method !== 'POST') {
+    response.statusCode = 405;
+    response.setHeader('Allow', 'POST');
+    response.end('Method not allowed');
+    return;
+  }
+
+  const chunks: Buffer[] = [];
+  request.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+  request.on('error', (error) => {
+    response.statusCode = 500;
+    response.end(error.message);
+  });
+  request.on('end', async () => {
+    try {
+      const image = parseMultipartImage(Buffer.concat(chunks), request.headers['content-type']);
+      const extension = IMAGE_MIME_TO_EXTENSION[image.mimeType] ?? path.extname(image.fileName).replace('.', '').toLowerCase();
+      if (!['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(extension)) {
+        response.statusCode = 415;
+        response.end('Format image non supporté.');
+        return;
+      }
+
+      // Sauvegarde physique : les images insérées sont écrites dans public/images,
+      // ce qui les rend servies par Vite sous le chemin relatif court images/<fichier>.
+      const imagesDirectory = path.resolve(__dirname, 'public/images');
+      await mkdir(imagesDirectory, { recursive: true });
+      const normalizedExtension = extension === 'jpeg' ? 'jpg' : extension;
+      const fileName = `${cleanImageName(image.fileName)}-${Date.now().toString(36)}.${normalizedExtension}`;
+      await writeFile(path.join(imagesDirectory, fileName), image.buffer);
+
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ src: `images/${fileName}` }));
+    } catch (error) {
+      response.statusCode = 400;
+      response.end(error instanceof Error ? error.message : 'Sauvegarde image impossible.');
+    }
+  });
+}
+
 function localImageStoragePlugin(): Plugin {
   return {
     name: 'edit-knowledge-local-image-storage',
     configureServer(server) {
-      server.middlewares.use('/api/images', (request, response) => {
-        if (request.method !== 'POST') {
-          response.statusCode = 405;
-          response.end('Method not allowed');
-          return;
-        }
-
-        const chunks: Buffer[] = [];
-        request.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
-        request.on('error', (error) => {
-          response.statusCode = 500;
-          response.end(error.message);
-        });
-        request.on('end', async () => {
-          try {
-            const image = parseMultipartImage(Buffer.concat(chunks), request.headers['content-type']);
-            const extension = IMAGE_MIME_TO_EXTENSION[image.mimeType] ?? path.extname(image.fileName).replace('.', '').toLowerCase();
-            if (!['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(extension)) {
-              response.statusCode = 415;
-              response.end('Format image non supporté.');
-              return;
-            }
-
-            // Sauvegarde physique : les images insérées sont écrites dans public/images,
-            // ce qui les rend servies par Vite sous le chemin relatif court images/<fichier>.
-            const imagesDirectory = path.resolve(__dirname, 'public/images');
-            await mkdir(imagesDirectory, { recursive: true });
-            const normalizedExtension = extension === 'jpeg' ? 'jpg' : extension;
-            const fileName = `${cleanImageName(image.fileName)}-${Date.now().toString(36)}.${normalizedExtension}`;
-            await writeFile(path.join(imagesDirectory, fileName), image.buffer);
-
-            response.setHeader('Content-Type', 'application/json');
-            response.end(JSON.stringify({ src: `images/${fileName}` }));
-          } catch (error) {
-            response.statusCode = 400;
-            response.end(error instanceof Error ? error.message : 'Sauvegarde image impossible.');
-          }
-        });
-      });
+      server.middlewares.use('/api/images', handleImageUpload);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/api/images', handleImageUpload);
     },
   };
 }
