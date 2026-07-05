@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Toolbar } from './components/Toolbar';
 import { buildHtmlOutput, exampleHtml, formatHtml, minifyHtml, sanitizeEditableHtml } from './utils/html';
-import { getLocalImagePreviewSrc, rememberLocalImagePreview, storeLocalImage } from './utils/localImages';
+import { getLocalImagePreviewSrc, storeLocalImage } from './utils/localImages';
 import './styles.css';
 
 type SourceMatch = { start: number; end: number; status: string };
@@ -43,10 +43,11 @@ function getImageExtension(file: File): string {
 
 function createLocalImageReference(file: File): { previewSrc: string; outputSrc: string; fileName: string } {
   const fileName = `${cleanImageName(file.name)}-${Date.now().toString(36)}.${getImageExtension(file)}`;
-  const outputSrc = `${LOCAL_IMAGE_DIRECTORY}/${fileName}`;
-  const previewSrc = URL.createObjectURL(file);
-  rememberLocalImagePreview(outputSrc, previewSrc);
-  return { previewSrc, outputSrc, fileName };
+  return {
+    previewSrc: URL.createObjectURL(file),
+    outputSrc: `${LOCAL_IMAGE_DIRECTORY}/${fileName}`,
+    fileName,
+  };
 }
 
 function normalizeText(value: string): string {
@@ -295,9 +296,6 @@ export default function App() {
       return { previewSrc: payload.src, outputSrc: payload.src, persisted: true };
     } catch (error) {
       const localReference = createLocalImageReference(file);
-      await storeLocalImage(localReference.outputSrc, file).catch((storageError) => {
-        console.warn('Persistance IndexedDB indisponible, aperçu conservé pour la session courante uniquement.', storageError);
-      });
       console.warn('Upload /api/images indisponible, insertion statique sans base64.', error);
       return { ...localReference, persisted: false };
     }
@@ -317,6 +315,11 @@ export default function App() {
       // POST /api/images n’existe pas : on affiche alors un aperçu blob local, tandis que
       // le HTML final garde un chemin relatif images/nom.ext sans base64.
       imageReference = await saveImageFile(file);
+      if (!imageReference.persisted) {
+        await storeLocalImage(imageReference.outputSrc, file).catch((storageError) => {
+          console.warn('Persistance IndexedDB indisponible, aperçu conservé pour la session courante uniquement.', storageError);
+        });
+      }
     } catch (error) {
       setSyncStatus(error instanceof Error ? `Insertion refusée — ${error.message}` : 'Insertion refusée — sauvegarde image impossible');
       return;

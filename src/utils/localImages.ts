@@ -14,10 +14,6 @@ function openLocalImageDatabase(): Promise<IDBDatabase> {
   });
 }
 
-export function rememberLocalImagePreview(outputSrc: string, previewSrc: string): void {
-  localImagePreviewUrls.set(outputSrc, previewSrc);
-}
-
 export async function storeLocalImage(outputSrc: string, file: File): Promise<void> {
   const database = await openLocalImageDatabase();
   await new Promise<void>((resolve, reject) => {
