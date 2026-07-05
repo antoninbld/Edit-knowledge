@@ -109,6 +109,11 @@ function sanitizeDocument(document: Document) {
       if ((name === 'href' || name === 'src') && value.startsWith('javascript:')) {
         element.removeAttribute(attribute.name);
       }
+      // Nettoyage anti-base64 : le HTML final ne doit jamais conserver d'image inline.
+      // Les images insérées par l'éditeur sont des fichiers séparés référencés par chemin relatif.
+      if (name === 'src' && value.startsWith('data:')) {
+        element.removeAttribute(attribute.name);
+      }
     });
   });
 }
